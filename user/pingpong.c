@@ -1,45 +1,35 @@
 #include "kernel/types.h"
-#include "kernel/stat.h"
 #include "user/user.h"
+int main(int argc, char *argv[]){
+//两个进程通过管道传递ping-pong
+//父进程发送字节
+//子进程收到后打印<pid>: received ping；并发送字节给父进程并退出
+//父进程读字节后打印，然后退出
 
-int main(int argc,char *argv[]){
-// ''ping-pong'' a byte between two processes over a pair of pipes
-//The parent should send a byte to the child
-//the child should print "<pid>: received ping",
-//write the byte on the pipe to the parent, and exit
-
-//the parent should read the byte from the child,
-//print "<pid>: received pong", and exit.
-
-//fd[0] → r； fd[1] → w
-//pipefd1[2]父进程写子进程读
-//pipefd2[2]父进程读子进程写
-int pipefd1[2],pipefd2[2];
-pipe(pipefd1);
-pipe(pipefd2);
+int fds[2];
+int fds1[2];
 char buf[1];
-if (fork() == 0){
-//子进程
-close(pipefd1[1]);//子关写只读
-read(pipefd1[0],buf,1);
-close(pipefd1[0]);//子关写关读
+pipe(fds);//创建管道，读给fd[0],写给fd[1]
+ pipe(fds1);
+if(fork() == 0){//子进程
+close(fds[1]);//关闭写
+read(fds[0],buf,1);
+close(fds[0]);
 printf("%d: received ping\n",getpid());
 
-close(pipefd2[0]);
-write(pipefd2[1],buf,1);
-close(pipefd2[1]);
+ close(fds1[0]);
+ write(fds1[1],"a",1);
+ close(fds1[1]);
+}else{//父进程
+close(fds[0]);//关闭读
+write(fds[1],"a",1);
+close(fds[1]);//否则read会一直阻塞，等待新数据
 
-}else{
-//父进程
-close(pipefd1[0]);//父关读只写
-write(pipefd1[1],"a",1);
-close(pipefd1[1]);//父关读关写
-
-close(pipefd2[1]);
-read(pipefd2[0],buf,1);
-close(pipefd2[0]);
+close(fds1[1]);
+read(fds1[0],buf,1);
+close(fds1[0]);
 printf("%d: received pong\n",getpid());
 
 }
 exit(0);
-  }
+}
