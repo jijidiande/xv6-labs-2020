@@ -14,14 +14,17 @@ main(int argc, char *argv[])
     exit(1);
   }
 
+//字符串转int
+//调用trace,下面的trace应该是系统调用
   if (trace(atoi(argv[1])) < 0) {
     fprintf(2, "%s: trace failed\n", argv[0]);
     exit(1);
   }
-  
+  //argv[0] argv[1] argv[2] argv[3] argv[4]
+  //trace 32 grep hello README
   for(i = 2; i < argc && i < MAXARG; i++){
     nargv[i-2] = argv[i];
   }
-  exec(nargv[0], nargv);
+  exec(nargv[0], nargv);//grep hello README
   exit(0);
 }

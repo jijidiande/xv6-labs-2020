@@ -6,6 +6,7 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "sysinfo.h"
 
 uint64
 sys_exit(void)
@@ -94,4 +95,37 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+//实现trace系统调用,获取系统调用参数的方法在syscall.c中
+//意思就是，只有调用了trace，才会传递mask，进而打印
+uint64
+sys_trace(void)
+{
+  int mask;
+  if(argint(0,&mask)<0){// 判断参数是否获取成功
+    return -1;
+  }
+//为该字段进行赋值，赋值的 mask 为系统调用传过来的参数，放在了 a0 寄存器中
+//argint() 函数可以从对应的寄存器中取出参数并转成 int 类型
+//myproc()获取进程号
+  myproc()->mask = mask;
+  return 0;
+}
+
+uint64
+sys_sysinfo(void)
+{
+  struct sysinfo info;
+  uint64 addr;
+  // 获取用户态传入的sysinfo结构体
+  if (argaddr(0, &addr) < 0) 
+    return -1;
+  struct proc* p = myproc();
+  info.freemem = freememory();
+  info.nproc = proc_size();
+  // 将内核态中的info复制到用户态
+  if (copyout(p->pagetable, addr, (char*)&info, sizeof(info)) < 0)
+    return -1;
+  return 0;
 }

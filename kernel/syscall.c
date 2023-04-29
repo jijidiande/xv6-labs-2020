@@ -104,6 +104,8 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_wait(void);
 extern uint64 sys_write(void);
 extern uint64 sys_uptime(void);
+extern uint64 sys_trace(void);
+extern uint64 sys_sysinfo(void);
 
 static uint64 (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -127,8 +129,16 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_trace]   sys_trace,
+[SYS_sysinfo] sys_sysinfo
 };
 
+char* syscalls_name[24] = {"", "fork", "exit", "wait", "pipe", "read", "kill", "exec",
+                      "fstat", "chdir", "dup", "getpid", "sbrk", "sleep", "uptime",
+                      "open", "write", "mknod", "unlink", "link", "mkdir", "close", "trace","sysinfo"};
+
+//从user space中获取 system call arguments
+//print the trace output
 void
 syscall(void)
 {
@@ -137,7 +147,13 @@ syscall(void)
 
   num = p->trapframe->a7;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
-    p->trapframe->a0 = syscalls[num]();
+    p->trapframe->a0 = syscalls[num]();//调用系统调用,并将返回值存到进程寄存器中
+//print out a line when each system call is about to return, 
+//line contain the process id, the name of the system call and the return value
+//if the system call's number is set in the mask
+    if ((1 << num) & p->mask) {
+    printf("%d: syscall %s -> %d\n", p->pid, syscalls_name[num], p->trapframe->a0);
+  }
   } else {
     printf("%d %s: unknown sys call %d\n",
             p->pid, p->name, num);
