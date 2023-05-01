@@ -440,3 +440,28 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+//Recursively
+void vm_print(pagetable_t pagetable,int level){
+    for(int i=0;i<512;i++){
+        pte_t pte = pagetable[i];
+        //pte_t是页表项，pagetable_t是页表物理地址即存在satp的那个
+          if(pte & PTE_V){//检查pte中第0位的值
+              pagetable_t child = (pagetable_t)PTE2PA(pte);//右移10位得到PPN，左移12位得到页表物理起始地址：见图3.1，注意区分地址和存的地址
+              if(level==0){
+                printf("..%d: pte %p pa %p\n",i,pagetable[i],child);
+                vm_print(child,level+1);
+            } else if(level==1){
+                printf(".. ..%d: pte %p pa %p\n",i,pagetable[i],child);
+                vm_print(child,level+1);
+            } else if(level==2){
+                printf(".. .. ..%d: pte %p pa %p\n",i,pagetable[i],child);
+            }
+        }
+    }
+}
+
+void vmprint(pagetable_t pagetable){
+    printf("page table %p\n",pagetable);
+   vm_print(pagetable,0);
+}

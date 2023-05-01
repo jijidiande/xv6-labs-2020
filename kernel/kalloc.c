@@ -23,6 +23,7 @@ struct {
   struct run *freelist;
 } kmem;
 
+//初始化空闲页链表，以保存内核地址结束到 PHYSTOP 之间的每一页
 void
 kinit()
 {
@@ -30,6 +31,7 @@ kinit()
   freerange(end, (void*)PHYSTOP);
 }
 
+////添加对齐的物理地址到空闲链表中
 void
 freerange(void *pa_start, void *pa_end)
 {
