@@ -31,7 +31,7 @@ kinit()
   freerange(end, (void*)PHYSTOP);
 }
 
-////添加对齐的物理地址到空闲链表中
+//添加对齐的物理地址到空闲链表中
 void
 freerange(void *pa_start, void *pa_end)
 {

@@ -34,12 +34,13 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
+
+    /*  char *pa = kalloc();
       if(pa == 0)
         panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
+      uint64 va = KSTACK((int) (p - proc));//索引偏移量，
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      p->kstack = va; */
   }
   kvminithart();
 }
@@ -114,12 +115,28 @@ found:
   }
 
   // An empty user page table.
-  p->pagetable = proc_pagetable(p);
+  p->pagetable = proc_pagetable(p);//Create a user page table for a given process,不用传p其实也没事
   if(p->pagetable == 0){
     freeproc(p);
     release(&p->lock);
     return 0;
   }
+
+  // An empty kernel page table
+  p->kpagetable = ukvminit();
+    if(p->kpagetable == 0){
+        freeproc(p);
+        release(&p->lock);
+        return 0;
+    }
+  // 在初始化进程的时候，就初始化内核栈
+     char *pa = kalloc();
+    if(pa == 0)
+      panic("kalloc");
+    //uint64 va = KSTACK((int)0);//将内核栈映射到固定的逻辑地址上
+    uint64 va = KSTACK((int) (p - proc));
+    ukvmmap(p->kpagetable,va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+    p->kstack = va;
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -128,6 +145,19 @@ found:
   p->context.sp = p->kstack + PGSIZE;
 
   return p;
+}
+
+void proc_freewalk(pagetable_t pagetable) {
+    for(int i = 0; i < 512; i++){
+        pte_t pte = pagetable[i];
+        uint64 child = PTE2PA(pte);
+        if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){ // 如果该页表项指向更低一级的页表
+            // 递归释放低一级页表及其页表项
+            proc_freewalk((pagetable_t)child);
+            pagetable[i] = 0;
+        }
+    }
+    kfree((void*)pagetable); // 释放当前级别页表所占用空间
 }
 
 // free a proc structure and the data hanging from it,
@@ -150,6 +180,19 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  //释放内核栈
+    if(p->kstack) {
+        pte_t* pte = walk(p->kpagetable, p->kstack, 0);
+        if(pte == 0)
+            panic("freeproc: walk");
+        kfree((void*)PTE2PA(*pte));
+    }
+    p->kstack = 0;
+//释放页表
+    if(p->kpagetable) {
+        proc_freewalk(p->kpagetable);
+    }
+    p->kpagetable = 0;
 }
 
 // Create a user page table for a given process,
@@ -473,7 +516,15 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
-        swtch(&c->context, &p->context);
+       /* swtch(&c->context, &p->context);*/
+
+       //切换到进程的内核页表
+          w_satp(MAKE_SATP(p->kpagetable));
+          sfence_vma();
+       //调度，执行进程
+          swtch(&c->context, &p->context);//旧进程和新进程切换
+       //切换回全局内核页表
+          kvminithart();
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
