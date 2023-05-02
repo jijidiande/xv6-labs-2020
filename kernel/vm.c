@@ -57,6 +57,7 @@ kvminithart()
   w_satp(MAKE_SATP(kernel_pagetable));
   sfence_vma();
 }
+
 void ukvmmap(pagetable_t kpagetable, uint64 va, uint64 pa, uint64 sz, int perm) {
     if(mappages(kpagetable, va, sz, pa, perm) != 0)
         panic("uvmmap");
@@ -66,7 +67,7 @@ pagetable_t ukvminit() {
     memset(kpagetable, 0, PGSIZE);//将这个页初始化为0
     ukvmmap(kpagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
     ukvmmap(kpagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
-    ukvmmap(kpagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+   // ukvmmap(kpagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
     ukvmmap(kpagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
     ukvmmap(kpagetable, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
     ukvmmap(kpagetable, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
@@ -203,9 +204,9 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
+    if((*pte & PTE_V) == 0)//检查页表项是否已经映射
       panic("uvmunmap: not mapped");
-    if(PTE_FLAGS(*pte) == PTE_V)
+    if(PTE_FLAGS(*pte) == PTE_V)//叶子页是指没有子页面的页
       panic("uvmunmap: not a leaf");
     if(do_free){
       uint64 pa = PTE2PA(*pte);
@@ -394,30 +395,87 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   return 0;
 }
 
+int copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);
+int copyinstr_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
+
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
+  /*uint64 n, va0, pa0;
 
   while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+    va0 = PGROUNDDOWN(srcva);//按页大小向下对齐
+    pa0 = walkaddr(pagetable, va0);//Look up a virtual address of user page, return the physical address,
+    if(pa0 == 0)//页面不存在或者没有权限
       return -1;
-    n = PGSIZE - (srcva - va0);
+    n = PGSIZE - (srcva - va0);//拷贝数据长度
     if(n > len)
       n = len;
     memmove(dst, (void *)(pa0 + (srcva - va0)), n);
 
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
+    len -= n;//更新剩余的拷贝长度 len
+    dst += n;//更新目标地址 dst
+    srcva = va0 + PGSIZE;//更新源地址为下一页的起始地址 va0 + PGSIZE
   }
-  return 0;
+  return 0; */
+    return copyin_new(pagetable, dst, srcva, len);
 }
+
+
+int
+kvmcopymappings(pagetable_t src, pagetable_t dst, uint64 start, uint64 sz)
+{
+    pte_t *pte;
+    uint64 pa, i;
+    uint flags;
+
+    // PGROUNDUP: prevent re-mapping already mapped pages (eg. when doing growproc)
+    for(i = PGROUNDUP(start); i < start + sz; i += PGSIZE){
+        if((pte = walk(src, i, 0)) == 0)
+            panic("kvmcopymappings: pte should exist");
+        if((*pte & PTE_V) == 0)
+            panic("kvmcopymappings: page not present");
+        pa = PTE2PA(*pte);
+        // `& ~PTE_U` 表示将该页的权限设置为非用户页
+        // 必须设置该权限，RISC-V 中内核是无法直接访问用户页的。
+        flags = PTE_FLAGS(*pte) & ~PTE_U;
+        if(mappages(dst, i, PGSIZE, pa, flags) != 0){
+            goto err;
+        }
+    }
+    return 0;
+    err:
+    // thanks @hdrkna for pointing out a mistake here.
+    // original code incorrectly starts unmapping from 0 instead of PGROUNDUP(start)
+    uvmunmap(dst, PGROUNDUP(start), (i - PGROUNDUP(start)) / PGSIZE, 0);
+    return -1;
+}
+
+// 与 uvmdealloc 功能类似，将程序内存从 oldsz 缩减到 newsz。但区别在于不释放实际内存
+// 用于内核页表内程序内存映射与用户页表程序内存映射之间的同步
+uint64
+kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+    if(newsz >= oldsz)
+        return oldsz;
+    if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+        int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+        uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
+    }
+    return newsz;
+}
+
+
+
+
+
+
+
+
+
 
 // Copy a null-terminated string from user to kernel.
 // Copy bytes to dst from virtual address srcva in a given page table,
@@ -426,6 +484,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
+    /*
   uint64 n, va0, pa0;
   int got_null = 0;
 
@@ -460,6 +519,8 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+     */
+    return copyinstr_new(pagetable, dst, srcva, max);
 }
 
 //Recursively

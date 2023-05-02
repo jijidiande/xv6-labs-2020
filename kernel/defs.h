@@ -182,7 +182,8 @@ void            vmprint(pagetable_t);
 pagetable_t     ukvminit(void);
 pte_t *         walk(pagetable_t pagetable, uint64 va, int alloc);
 void            ukvmmap(pagetable_t kpagetable, uint64 va, uint64 pa, uint64 sz, int perm);
-
+int             kvmcopymappings(pagetable_t src, pagetable_t dst, uint64 start, uint64 sz);
+uint64          kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);
